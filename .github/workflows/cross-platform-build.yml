@@ -1,0 +1,114 @@
+name: Cross platform build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        build_type: [Release]
+        include:
+          - os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+          - os: macos-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set reusable strings
+      id: strings
+      shell: bash
+      run: echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
+    - name: Install Python dependencies
+      shell: bash
+      run: |
+        if [[ "$RUNNER_OS" == "Linux" ]]; then
+          sudo apt update || true
+          sudo apt install -y python3-pip procps || true
+          python3 -m pip install --upgrade pip
+          pip3 install matplotlib pandas psutil
+        elif [[ "$RUNNER_OS" == "macOS" ]]; then
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install matplotlib pandas psutil
+        elif [[ "$RUNNER_OS" == "Windows" ]]; then
+          python -m pip install --upgrade pip
+          pip install matplotlib pandas psutil
+        fi
+
+    - name: Configure CMake
+      shell: bash
+      run: |
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          cmake -S . -B "$(cygpath -u "${{ steps.strings.outputs.build-output-dir }}")" -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        else
+          cmake -S . -B ${{ steps.strings.outputs.build-output-dir }} \
+                -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
+                -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
+                -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        fi
+
+    - name: Build
+      shell: bash
+      run: |
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          cmake --build "$(cygpath -u "${{ steps.strings.outputs.build-output-dir }}")" --config Release
+        else
+          cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+        fi
+
+    - name: Run fragmentation test
+      shell: bash
+      run: |
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          exe_path="$(cygpath -u "${{ steps.strings.outputs.build-output-dir }}")/Release/fragmentation.exe"
+          echo "Running: $exe_path"
+          "$exe_path"
+          echo "=== Listing contents of build dir ==="
+          ls "$(cygpath -u "${{ steps.strings.outputs.build-output-dir }}")/Release"
+        else
+          cd ${{ steps.strings.outputs.build-output-dir }}
+          ./fragmentation
+          echo "=== Listing contents of build dir ==="
+          ls
+        fi
+
+    - name: Run graphing script
+      shell: bash
+      run: |
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          build_dir_unix="$(cygpath -u '${{ steps.strings.outputs.build-output-dir }}')"
+          cd "$build_dir_unix/Release"
+          python3 ../../plot_fragmentation.py fragmentation_log.csv
+          mv plot.png "$build_dir_unix/../plot.png"
+        elif [[ "$RUNNER_OS" == "macOS" ]]; then
+          cd ${{ steps.strings.outputs.build-output-dir }}
+          source ../venv/bin/activate
+          python3 ../plot_fragmentation.py fragmentation_log.csv
+          mv plot.png ../plot.png
+        else
+          cd ${{ steps.strings.outputs.build-output-dir }}
+          python3 ../plot_fragmentation.py fragmentation_log.csv
+          mv plot.png ../plot.png
+        fi
+
+    - name: Upload fragmentation graph
+      uses: actions/upload-artifact@v4
+      with:
+        name: fragmentation-plot-${{ matrix.build.cpp_compiler }}-${{ runner.os }}
+        path: plot.png
