@@ -1,3 +1,6 @@
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for headless environments
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import sys
@@ -20,4 +23,3 @@ fig.tight_layout()
 plt.title('Memory Fragmentation Over Time')
 
 plt.savefig("plot.png")
-plt.show()

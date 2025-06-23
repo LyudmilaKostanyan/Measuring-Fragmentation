@@ -47,7 +47,7 @@ size_t getCurrentRSS() {
 #endif
 
 int main(int argc, char** argv) {
-    size_t iterations = 1000;
+    size_t iterations = 10000;
     size_t max_object_size = 32 * 1024;
 
     std::vector<void*> allocations;
