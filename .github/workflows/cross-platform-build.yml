@@ -43,13 +43,32 @@ jobs:
             pip3 install matplotlib pandas --break-system-packages
           fi
 
+      - name: Install jemalloc
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt update
+            sudo apt install -y libjemalloc-dev
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install jemalloc
+          fi
+
       - name: Configure CMake
         shell: bash
         run: |
-          cmake -S . -B ${{ steps.strings.outputs.build-output-dir }} \
-            -DCMAKE_C_COMPILER=${{ matrix.build.c_compiler }} \
-            -DCMAKE_CXX_COMPILER=${{ matrix.build.cpp_compiler }} \
-            -DCMAKE_BUILD_TYPE=Release
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            cmake -S . -B ${{ steps.strings.outputs.build-output-dir }} \
+              -DCMAKE_C_COMPILER=${{ matrix.build.c_compiler }} \
+              -DCMAKE_CXX_COMPILER=${{ matrix.build.cpp_compiler }} \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INCLUDE_PATH=/opt/homebrew/include \
+              -DCMAKE_LIBRARY_PATH=/opt/homebrew/lib
+          else
+            cmake -S . -B ${{ steps.strings.outputs.build-output-dir }} \
+              -DCMAKE_C_COMPILER=${{ matrix.build.c_compiler }} \
+              -DCMAKE_CXX_COMPILER=${{ matrix.build.cpp_compiler }} \
+              -DCMAKE_BUILD_TYPE=Release
+          fi
 
       - name: Build
         shell: bash
@@ -66,6 +85,12 @@ jobs:
         shell: bash
         run: |
           python3 plot_fragmentation.py fragmentation_log.csv
+
+      - name: Upload CSV
+        uses: actions/upload-artifact@v4
+        with:
+          name: fragmentation-data-${{ matrix.build.cpp_compiler }}-${{ runner.os }}
+          path: fragmentation_log.csv
 
       - name: Upload fragmentation graphic
         uses: actions/upload-artifact@v4

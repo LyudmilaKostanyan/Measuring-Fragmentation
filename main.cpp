@@ -3,9 +3,11 @@
 #include <vector>
 #include <random>
 #include <chrono>
-#include <thread>
 #include <cstring>
+#include <thread>
+#include <jemalloc/jemalloc.h>
 
+// === Platform-specific RSS measurement ===
 #if defined(__APPLE__)
 #include <mach/mach.h>
 size_t getCurrentRSS() {
@@ -16,7 +18,6 @@ size_t getCurrentRSS() {
         return 0;
     return info.resident_size / 1024;
 }
-
 #elif defined(_WIN32)
 #include <windows.h>
 #include <psapi.h>
@@ -25,11 +26,9 @@ size_t getCurrentRSS() {
     GetProcessMemoryInfo(GetCurrentProcess(), &info, sizeof(info));
     return info.WorkingSetSize / 1024;
 }
-
 #else // Linux
 #include <fstream>
 #include <sstream>
-
 size_t getCurrentRSS() {
     std::ifstream status("/proc/self/status");
     std::string line;
@@ -39,24 +38,32 @@ size_t getCurrentRSS() {
             std::string tmp;
             size_t rss;
             iss >> tmp >> rss;
-            return rss; // kB
+            return rss;
         }
     }
     return 0;
 }
 #endif
 
-int main(int argc, char** argv) {
-    size_t iterations = 10000;
-    size_t max_object_size = 32 * 1024;
+// === jemalloc stat accessor ===
+size_t get_stat(const char* name) {
+    size_t value;
+    size_t sz = sizeof(value);
+    mallctl(name, &value, &sz, nullptr, 0);
+    return value;
+}
+
+int main() {
+    const size_t iterations = 10000;
+    const size_t max_object_size = 32 * 1024;
 
     std::vector<void*> allocations;
     std::mt19937 gen(std::random_device{}());
     std::uniform_int_distribution<size_t> size_dist(1024, max_object_size);
     std::uniform_real_distribution<double> action_dist(0.0, 1.0);
 
-    std::ofstream log_file("fragmentation_log.csv");
-    log_file << "iteration,memory_usage_kb,allocated_objects\n";
+    std::ofstream log("fragmentation_log.csv");
+    log << "iteration,allocated,mapped,rss_kb,fragmentation_percent,live_allocations\n";
 
     for (size_t i = 0; i < iterations; ++i) {
         if (!allocations.empty() && action_dist(gen) < 0.5) {
@@ -66,23 +73,35 @@ int main(int argc, char** argv) {
         } else {
             size_t alloc_size = size_dist(gen);
             void* ptr = malloc(alloc_size);
-            if (ptr != nullptr) {
+            if (ptr)
                 memset(ptr, 0xAA, alloc_size);
-                allocations.push_back(ptr);
-            }
+            allocations.push_back(ptr);
         }
 
         if (i % 100 == 0) {
-            size_t mem_usage = getCurrentRSS();
-            log_file << i << "," << mem_usage << "," << allocations.size() << "\n";
+            size_t allocated = get_stat("stats.allocated");
+            size_t mapped = get_stat("stats.mapped");
+            size_t rss = getCurrentRSS();
+            double frag = (mapped > 0) ? (mapped - allocated) * 100.0 / mapped : 0.0;
+
+            log << i << "," << allocated << "," << mapped << "," << rss << "," << frag << "," << allocations.size() << "\n";
+
+            std::cout << "Iteration " << i
+                      << " | Allocated: " << allocated / 1024 << " KB"
+                      << " | Mapped: " << mapped / 1024 << " KB"
+                      << " | RSS: " << rss << " KB"
+                      << " | Fragmentation: " << frag << " %"
+                      << " | Live allocations: " << allocations.size()
+                      << "\n";
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
-    for (auto& alloc : allocations)
-        free(alloc);
+    for (void* ptr : allocations)
+        free(ptr);
 
-    log_file.close();
-    std::cout << "Fragmentation log saved to fragmentation_log.csv\n";
+    log.close();
+    std::cout << "Log written to fragmentation_jemalloc.csv\n";
+    return 0;
 }
