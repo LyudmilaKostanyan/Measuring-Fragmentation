@@ -57,37 +57,42 @@ int main() {
     const size_t iterations = 10000;
     const size_t max_object_size = 32 * 1024;
 
-    std::vector<void*> allocations;
+    // Store both pointer and size for manual tracking
+    std::vector<std::pair<void*, size_t>> allocations;
+
     std::mt19937 gen(std::random_device{}());
     std::uniform_int_distribution<size_t> size_dist(1024, max_object_size);
     std::uniform_real_distribution<double> action_dist(0.0, 1.0);
 
     std::ofstream log("fragmentation_log.csv");
-    log << "iteration,allocated,mapped,rss_kb,fragmentation_percent,live_allocations\n";
+    log << "iteration,actual_allocated,mapped,rss_kb,fragmentation_percent,live_allocations\n";
 
     for (size_t i = 0; i < iterations; ++i) {
         if (!allocations.empty() && action_dist(gen) < 0.5) {
             size_t idx = gen() % allocations.size();
-            free(allocations[idx]);
+            free(allocations[idx].first);
             allocations.erase(allocations.begin() + idx);
         } else {
             size_t alloc_size = size_dist(gen);
             void* ptr = malloc(alloc_size);
             if (ptr)
                 memset(ptr, 0xAA, alloc_size);
-            allocations.push_back(ptr);
+            allocations.emplace_back(ptr, alloc_size);
         }
 
         if (i % 100 == 0) {
-            size_t allocated = get_stat("stats.allocated");
+            size_t actual_allocated = 0;
+            for (const auto& [ptr, size] : allocations)
+                actual_allocated += size;
+
             size_t mapped = get_stat("stats.mapped");
             size_t rss = getCurrentRSS();
-            double frag = (mapped > 0) ? (mapped - allocated) * 100.0 / mapped : 0.0;
+            double frag = (mapped > 0) ? (mapped - actual_allocated) * 100.0 / mapped : 0.0;
 
-            log << i << "," << allocated << "," << mapped << "," << rss << "," << frag << "," << allocations.size() << "\n";
+            log << i << "," << actual_allocated << "," << mapped << "," << rss << "," << frag << "," << allocations.size() << "\n";
 
             std::cout << "Iteration " << i
-                      << " | Allocated: " << allocated / 1024 << " KB"
+                      << " | Actual Allocated: " << actual_allocated / 1024 << " KB"
                       << " | Mapped: " << mapped / 1024 << " KB"
                       << " | RSS: " << rss << " KB"
                       << " | Fragmentation: " << frag << " %"
@@ -98,10 +103,10 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
-    for (void* ptr : allocations)
+    for (auto& [ptr, _] : allocations)
         free(ptr);
 
     log.close();
-    std::cout << "Log written to fragmentation_jemalloc.csv\n";
+    std::cout << "Log written to fragmentation_log.csv\n";
     return 0;
 }

@@ -10,7 +10,7 @@ data = pd.read_csv(sys.argv[1])
 fig, ax1 = plt.subplots()
 
 ax1.plot(data['iteration'], data['rss_kb'], 'r-', label='RSS (kB)')
-ax1.plot(data['iteration'], data['allocated'] / 1024, 'g--', label='Allocated (kB)')
+ax1.plot(data['iteration'], data['actual_allocated'] / 1024, 'g--', label='Actual Allocated (kB)')
 ax1.plot(data['iteration'], data['mapped'] / 1024, 'orange', label='Mapped (kB)')
 
 ax1.set_xlabel('Iteration')
